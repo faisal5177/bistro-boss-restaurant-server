@@ -33,7 +33,7 @@ async function run() {
     // Get the collection
     const database = client.db('bistroDB');
     menuCollection = database.collection('menu');
-    reviewCollection = database.collection('reviews');
+    const cartCollection = database.collection('Carts');
 
     app.get('/menu', async (req, res) => {
       const result = await menuCollection.find().toArray();
@@ -42,6 +42,20 @@ async function run() {
 
     app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
+      res.send(result);
+    });
+
+    //  carts collection
+    app.get('/cart', async (req, res) => {
+      const email = req.query.email;
+      const query = email ? { email } : {};
+      const result = await cartCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.post('/carts', async (req, res) => {
+      const cartItem = req.body;
+      const result = await cartCollection.insertOne(cartItem);
       res.send(result);
     });
 
@@ -79,3 +93,9 @@ app.get('/menu', async (req, res) => {
 app.listen(port, () => {
   console.log(` Bistro boss is sitting on port ${port}`);
 });
+
+/**
+ * ---------------
+ * NAMING CONVEMTION
+ * ---------------
+ **/
