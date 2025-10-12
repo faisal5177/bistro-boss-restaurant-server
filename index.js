@@ -34,6 +34,7 @@ async function run() {
     const database = client.db('bistroDB');
     menuCollection = database.collection('menu');
     const cartCollection = database.collection('Carts');
+    const reviewCollection = database.collection('reviews');
 
     app.get('/menu', async (req, res) => {
       const result = await menuCollection.find().toArray();
@@ -101,9 +102,3 @@ app.get('/menu', async (req, res) => {
 app.listen(port, () => {
   console.log(` Bistro boss is sitting on port ${port}`);
 });
-
-/**
- * ---------------
- * NAMING CONVEMTION
- * ---------------
- **/
