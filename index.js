@@ -63,6 +63,7 @@ async function run() {
     cartCollection = database.collection('Carts');
     reviewCollection = database.collection('reviews');
     userCollection = database.collection('users');
+    bookingCollection = database.collection('bookings');
 
     // ---------------- JWT ----------------
     app.post('/jwt', async (req, res) => {
@@ -98,13 +99,18 @@ async function run() {
       res.send({ admin: user?.role === 'admin' });
     });
 
-    app.patch('/users/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { role: 'admin' } };
-      const result = await userCollection.updateOne(filter, updateDoc);
-      res.send(result);
-    });
+    app.patch(
+      '/users/admin/:id',
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = { $set: { role: 'admin' } };
+        const result = await userCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      }
+    );
 
     app.delete('/users/:id', verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
@@ -113,14 +119,120 @@ async function run() {
     });
 
     // ---------------- MENU ----------------
+    // ✅ GET all menu items
     app.get('/menu', async (req, res) => {
       const result = await menuCollection.find().toArray();
+      res.send(result);
+    });
+
+    // ✅ POST a new menu item (admin only)
+    app.post('/menu', verifyToken, verifyAdmin, async (req, res) => {
+      const newItem = req.body;
+      const result = await menuCollection.insertOne(newItem);
+      res.send(result);
+    });
+
+    // ✅ GET a single item by ID (for edit)
+    app.get('/menu/:id', async (req, res) => {
+      const id = req.params.id;
+      const result = await menuCollection.findOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
+
+    // ✅ DELETE a menu item (admin only)
+    app.delete('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const result = await menuCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
+
+    // ✅ PATCH to update a menu item (admin only)
+    app.patch('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const updatedItem = req.body;
+
+      const updateDoc = {
+        $set: {
+          name: updatedItem.name,
+          category: updatedItem.category,
+          price: parseFloat(updatedItem.price),
+          image: updatedItem.image,
+          recipe: updatedItem.recipe,
+        },
+      };
+
+      const result = await menuCollection.updateOne(
+        { _id: new ObjectId(id) },
+        updateDoc
+      );
       res.send(result);
     });
 
     // ---------------- REVIEWS ----------------
     app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.post('/reviews', async (req, res) => {
+      const review = req.body;
+      if (!review.name || !review.details || !review.rating) {
+        return res.status(400).send({ error: 'Missing required fields' });
+      }
+      try {
+        const result = await reviewCollection.insertOne(review);
+        res
+          .status(201)
+          .send({ message: 'Review added', reviewId: result.insertedId });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: 'Failed to save review' });
+      }
+    });
+
+    // --------------MY BOOKING--------------
+    app.post('/bookings', async (req, res) => {
+      const booking = req.body;
+      const result = await bookingCollection.insertOne(booking);
+      res.send(result);
+    });
+
+    app.get('/bookings', verifyToken, async (req, res) => {
+      const email = req.query.email;
+      if (!email || req.decoded.email !== email) {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+
+      const result = await bookingCollection.find({ email }).toArray();
+      res.send(result);
+    });
+
+    app.get('/admin/bookings', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await bookingCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.delete('/bookings/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const userEmail = req.decoded.email;
+
+      const booking = await bookingCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      const user = await userCollection.findOne({ email: userEmail });
+
+      const isAdmin = user?.role === 'admin';
+      const isOwner = booking?.email === userEmail;
+
+      if (!isAdmin && !isOwner) {
+        return res
+          .status(403)
+          .send({ message: 'Forbidden: Not allowed to delete' });
+      }
+
+      const result = await bookingCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
       res.send(result);
     });
 
@@ -144,7 +256,9 @@ async function run() {
       const userEmail = req.decoded.email;
 
       try {
-        const cartItem = await cartCollection.findOne({ _id: new ObjectId(id) });
+        const cartItem = await cartCollection.findOne({
+          _id: new ObjectId(id),
+        });
         if (!cartItem) {
           return res.status(404).send({ message: 'Cart item not found' });
         }
@@ -157,7 +271,9 @@ async function run() {
           return res.status(403).send({ message: 'Forbidden: Not your item' });
         }
 
-        const result = await cartCollection.deleteOne({ _id: new ObjectId(id) });
+        const result = await cartCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
         res.send(result);
       } catch (error) {
         res.status(500).send({ error: 'Failed to delete cart item' });
