@@ -14,7 +14,6 @@ app.use(express.json());
 // MongoDB URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.8kzkr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// MongoDB Client
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -23,22 +22,49 @@ const client = new MongoClient(uri, {
   },
 });
 
-// Declare collection variable
+// Declare collections globally
 let menuCollection;
+let cartCollection;
+let reviewCollection;
+let userCollection;
+
+// JWT Middleware
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: 'unauthorized access' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: 'unauthorized access' });
+    }
+    req.decoded = decoded;
+    next();
+  });
+};
+
+// Verify Admin Middleware
+const verifyAdmin = async (req, res, next) => {
+  const email = req.decoded.email;
+  const user = await userCollection.findOne({ email });
+  if (user?.role !== 'admin') {
+    return res.status(403).send({ message: 'forbidden access' });
+  }
+  next();
+};
 
 async function run() {
   try {
-    // Connect to MongoDB
     await client.connect();
-
-    // Get the collection
     const database = client.db('bistroDB');
     menuCollection = database.collection('menu');
-    const cartCollection = database.collection('Carts');
-    const reviewCollection = database.collection('reviews');
-    const userCollection = database.collection('users');
+    cartCollection = database.collection('Carts');
+    reviewCollection = database.collection('reviews');
+    userCollection = database.collection('users');
 
-    // jwt related API
+    // ---------------- JWT ----------------
     app.post('/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
@@ -47,35 +73,17 @@ async function run() {
       res.send({ token });
     });
 
-    // middlewares
-    const verifyToken = (req, res, next) => {
-      console.log(`inside verify token`, req.headers.authorization);
-      if (!req.headers.authorization) {
-        return res.status(401).send({ message: 'unauthorized access' });
+    // ---------------- USERS ----------------
+    app.post('/users', async (req, res) => {
+      const user = req.body;
+      const existing = await userCollection.findOne({ email: user.email });
+      if (existing) {
+        return res.send({ message: 'user already exists', insertedId: null });
       }
-      const token = req.headers.authorization.split(' ')[1];
-      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-        if (err) {
-          return res.status(401).send({ message: 'unauthorized  access' });
-        }
-        req.decoded = decoded;
-        next();
-      });
-    };
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
 
-    // use verify admin after verifyToken
-    const verifyAdmin = async (req, res, next) => {
-      const email = req.decoded.email;
-      const query = { email: email };
-      const user = await userCollection.findOne(query);
-      const isAdmin = user?.role === 'admin';
-      if (!isAdmin) {
-        return res.status(403).send({ message: 'forbidden access' });
-      }
-      next();
-    };
-
-    // users related api
     app.get('/users', verifyToken, verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
@@ -83,63 +91,40 @@ async function run() {
 
     app.get('/users/admin/:email', verifyToken, async (req, res) => {
       const email = req.params.email;
-      if (email !== req.decoded.email) {
-        return res.status(403).send('forbidden access');
+      if (req.decoded.email !== email) {
+        return res.status(403).send({ message: 'forbidden access' });
       }
-      const query = { email };
-      const user = await userCollection.findOne(query);
-      const admin = user?.role === 'admin';
-      res.send({ admin });
+      const user = await userCollection.findOne({ email });
+      res.send({ admin: user?.role === 'admin' });
     });
 
-    app.post('/users', async (req, res) => {
-      const user = req.body;
-      const query = { email: user.email };
-      const existingUser = await userCollection.findOne(query);
-      if (existingUser) {
-        return res.send({ message: 'user already exists', insertedId: null });
-      }
-      const result = await userCollection.insertOne(user);
+    app.patch('/users/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { role: 'admin' } };
+      const result = await userCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
-
-    app.patch(
-      '/users/admin/:id',
-      verifyToken,
-      verifyAdmin,
-      async (req, res) => {
-        const id = req.params.id;
-        const filter = { _id: new ObjectId(id) };
-
-        const updateDoc = {
-          $set: {
-            role: 'admin',
-          },
-        };
-        const result = await userCollection.updateOne(filter, updateDoc);
-        res.send(result);
-      }
-    );
 
     app.delete('/users/:id', verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await userCollection.deleteOne(query);
+      const result = await userCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
-    //  menu related apis
+    // ---------------- MENU ----------------
     app.get('/menu', async (req, res) => {
       const result = await menuCollection.find().toArray();
       res.send(result);
     });
 
+    // ---------------- REVIEWS ----------------
     app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
       res.send(result);
     });
 
-    //  carts collection
+    // ---------------- CART ----------------
     app.get('/cart', async (req, res) => {
       const email = req.query.email;
       const query = email ? { email } : {};
@@ -153,45 +138,52 @@ async function run() {
       res.send(result);
     });
 
-    app.delete('/carts/:id', async (req, res) => {
+    //  Final, Secure DELETE Cart Route (with admin check)
+    app.delete('/carts/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
-      console.log('Trying to delete cart item with id:', id);
-      const query = { _id: new ObjectId(id) };
-      const result = await cartCollection.deleteOne(query);
-      res.send(result);
+      const userEmail = req.decoded.email;
+
+      try {
+        const cartItem = await cartCollection.findOne({ _id: new ObjectId(id) });
+        if (!cartItem) {
+          return res.status(404).send({ message: 'Cart item not found' });
+        }
+
+        const user = await userCollection.findOne({ email: userEmail });
+        const isAdmin = user?.role === 'admin';
+        const isOwner = cartItem.email === userEmail;
+
+        if (!isAdmin && !isOwner) {
+          return res.status(403).send({ message: 'Forbidden: Not your item' });
+        }
+
+        const result = await cartCollection.deleteOne({ _id: new ObjectId(id) });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: 'Failed to delete cart item' });
+      }
     });
 
-    // Test the connection
+    // ---------------- TEST ROUTES ----------------
+    app.get('/', (req, res) => {
+      res.send('Boss is sitting');
+    });
+
+    app.get('/api/data', (req, res) => {
+      res.json({ message: 'This is sample data from the API' });
+    });
+
+    // Test connection
     await client.db('admin').command({ ping: 1 });
     console.log(' Successfully connected to MongoDB!');
   } catch (error) {
     console.error(' MongoDB connection error:', error);
   }
-  // DO NOT close the client here — keep it connected
 }
 
 run().catch(console.dir);
 
-// Routes
-app.get('/', (req, res) => {
-  res.send('Boss is sitting');
-});
-
-app.get('/api/data', (req, res) => {
-  res.json({ message: 'This is sample data from the API' });
-});
-
-app.get('/menu', async (req, res) => {
-  try {
-    const result = await menuCollection.find().toArray();
-    res.send(result);
-  } catch (error) {
-    console.error('Error fetching menu:', error);
-    res.status(500).send({ error: 'Failed to fetch menu data' });
-  }
-});
-
-// Start server
+// Start Server
 app.listen(port, () => {
   console.log(` Bistro boss is sitting on port ${port}`);
 });
