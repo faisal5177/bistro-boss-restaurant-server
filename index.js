@@ -127,8 +127,8 @@ async function run() {
 
     // ✅ POST a new menu item (admin only)
     app.post('/menu', verifyToken, verifyAdmin, async (req, res) => {
-      const newItem = req.body;
-      const result = await menuCollection.insertOne(newItem);
+      const item = req.body;
+      const result = await menuCollection.insertOne(item);
       res.send(result);
     });
 
