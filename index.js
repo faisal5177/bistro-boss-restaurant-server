@@ -250,9 +250,10 @@ async function run() {
     });
 
     // ---------------- CART ----------------
-    app.get('/cart', async (req, res) => {
+    // carts collection
+    app.get('/carts', async (req, res) => {
       const email = req.query.email;
-      const query = email ? { email } : {};
+      const query = { email: email };
       const result = await cartCollection.find(query).toArray();
       res.send(result);
     });
@@ -262,6 +263,7 @@ async function run() {
       const result = await cartCollection.insertOne(cartItem);
       res.send(result);
     });
+
 
     //  Final, Secure DELETE Cart Route (with admin check)
     app.delete('/carts/:id', verifyToken, async (req, res) => {
