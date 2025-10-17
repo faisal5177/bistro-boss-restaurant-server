@@ -8,7 +8,13 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: ['http://localhost:5173'],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 // MongoDB URI
@@ -135,39 +141,46 @@ async function run() {
     // ✅ GET a single item by ID (for edit)
     app.get('/menu/:id', async (req, res) => {
       const id = req.params.id;
-      const result = await menuCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
+      console.log('Fetching menu item by id:', id);
+      try {
+        const query = { _id: new ObjectId(id) };
+        const result = await menuCollection.findOne(query);
+
+        if (!result) {
+          return res.status(404).send({ message: 'Item not found' });
+        }
+
+        res.send(result);
+      } catch (error) {
+        console.error('Error fetching item by ID:', error);
+        res.status(500).send({ message: 'Server error' });
+      }
     });
 
-    // ✅ DELETE a menu item (admin only)
-    app.delete('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
+    app.patch('/menu/:id', async (req, res) => {
+      const item = req.body;
       const id = req.params.id;
-      const result = await menuCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send(result);
-    });
-
-    // ✅ PATCH to update a menu item (admin only)
-    app.patch('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const updatedItem = req.body;
-
-      const updateDoc = {
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
         $set: {
-          name: updatedItem.name,
-          category: updatedItem.category,
-          price: parseFloat(updatedItem.price),
-          image: updatedItem.image,
-          recipe: updatedItem.recipe,
+          name: item.name,
+          category: item.category,
+          price: item.price,
+          recipe: item.recipe,
+          image: item.image,
         },
       };
 
-      const result = await menuCollection.updateOne(
-        { _id: new ObjectId(id) },
-        updateDoc
-      );
+      const result = await menuCollection.updateOne(filter, updatedDoc);
       res.send(result);
     });
 
+    app.delete('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await menuCollection.deleteOne(query);
+      res.send(result);
+    });
     // ---------------- REVIEWS ----------------
     app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
