@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -18,6 +18,7 @@ app.use(
 app.use(express.json());
 
 // MongoDB URI
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.8kzkr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 const client = new MongoClient(uri, {
@@ -29,10 +30,13 @@ const client = new MongoClient(uri, {
 });
 
 // Declare collections globally
+
 let menuCollection;
 let cartCollection;
 let reviewCollection;
 let userCollection;
+let paymentCollection;
+let bookingCollection;
 
 // JWT Middleware
 const verifyToken = (req, res, next) => {
@@ -70,6 +74,7 @@ async function run() {
     reviewCollection = database.collection('reviews');
     userCollection = database.collection('users');
     bookingCollection = database.collection('bookings');
+    paymentCollection = database.collection('payments');
 
     // ---------------- JWT ----------------
     app.post('/jwt', async (req, res) => {
@@ -294,12 +299,12 @@ async function run() {
       }
     });
 
-    //------------- PAYMENT INTENT -------------------
     // payment intent
     app.post('/create-payment-intent', async (req, res) => {
       const { price } = req.body;
-      const amount = parseInt(price * 100);
+const amount = Math.round(Number(price) * 100);
       console.log(amount, 'amount inside the intent');
+
 
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amount,
@@ -310,16 +315,19 @@ async function run() {
       res.send({
         clientSecret: paymentIntent.client_secret,
       });
+      console.log('✅ Created PaymentIntent:', paymentIntent);
+
+
     });
 
     app.get('/payments/:email', verifyToken, async (req, res) => {
-      const query = { email: req.params.email };
+      const query = { email: req.params.email }
       if (req.params.email !== req.decoded.email) {
         return res.status(403).send({ message: 'forbidden access' });
       }
       const result = await paymentCollection.find(query).toArray();
       res.send(result);
-    });
+    })
 
     app.post('/payments', async (req, res) => {
       const payment = req.body;
@@ -329,14 +337,15 @@ async function run() {
       console.log('payment info', payment);
       const query = {
         _id: {
-          $in: payment.cartIds.map((id) => new ObjectId(id)),
-        },
+          $in: payment.cartIds.map(id => new ObjectId(id))
+        }
       };
 
       const deleteResult = await cartCollection.deleteMany(query);
 
       res.send({ paymentResult, deleteResult });
-    });
+    })
+
 
     // ---------------- TEST ROUTES ----------------
     app.get('/', (req, res) => {
