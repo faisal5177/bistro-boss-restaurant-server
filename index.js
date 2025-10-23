@@ -41,6 +41,7 @@ let bookingCollection;
 // JWT Middleware
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
+  console.log(' Authorization Header:', authHeader);
   if (!authHeader) {
     return res.status(401).send({ message: 'unauthorized access' });
   }
@@ -48,8 +49,12 @@ const verifyToken = (req, res, next) => {
   const token = authHeader.split(' ')[1];
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if (err) {
+      console.log(' Token verification failed:', err.message);
+
       return res.status(401).send({ message: 'unauthorized access' });
     }
+    console.log('✅ Decoded JWT:', decoded);
+
     req.decoded = decoded;
     next();
   });
@@ -130,20 +135,20 @@ async function run() {
     });
 
     // ---------------- MENU ----------------
-    // ✅ GET all menu items
+    //  GET all menu items
     app.get('/menu', async (req, res) => {
       const result = await menuCollection.find().toArray();
       res.send(result);
     });
 
-    // ✅ POST a new menu item (admin only)
+    //  POST a new menu item (admin only)
     app.post('/menu', verifyToken, verifyAdmin, async (req, res) => {
       const item = req.body;
       const result = await menuCollection.insertOne(item);
       res.send(result);
     });
 
-    // ✅ GET a single item by ID (for edit)
+    //  GET a single item by ID (for edit)
     app.get('/menu/:id', async (req, res) => {
       const id = req.params.id;
       console.log('Fetching menu item by id:', id);
@@ -264,10 +269,11 @@ async function run() {
     });
 
     app.post('/carts', async (req, res) => {
-      const cartItem = req.body;
+      const cartItem = { ...req.body, status: 'Pending' };
       const result = await cartCollection.insertOne(cartItem);
       res.send(result);
     });
+
 
     //  Final, Secure DELETE Cart Route (with admin check)
     app.delete('/carts/:id', verifyToken, async (req, res) => {
@@ -302,7 +308,7 @@ async function run() {
     // payment intent
     app.post('/create-payment-intent', async (req, res) => {
       const { price } = req.body;
-const amount = Math.round(Number(price) * 100);
+      const amount = Math.round(Number(price) * 100);
       console.log(amount, 'amount inside the intent');
 
 
@@ -315,7 +321,7 @@ const amount = Math.round(Number(price) * 100);
       res.send({
         clientSecret: paymentIntent.client_secret,
       });
-      console.log('✅ Created PaymentIntent:', paymentIntent);
+      console.log(' Created PaymentIntent:', paymentIntent);
 
 
     });
@@ -346,6 +352,74 @@ const amount = Math.round(Number(price) * 100);
       res.send({ paymentResult, deleteResult });
     })
 
+
+    // stats or analytics
+    app.get('/admin-stats', verifyToken, verifyAdmin, async (req, res) => {
+      const users = await userCollection.estimatedDocumentCount();
+      const menuItems = await menuCollection.estimatedDocumentCount();
+      const orders = await paymentCollection.estimatedDocumentCount();
+
+      // this is not the best way
+      // const payments = await paymentCollection.find().toArray();
+      // const revenue = payments.reduce((total, payment) => total + payment.price, 0);
+
+      const result = await paymentCollection.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRevenue: {
+              $sum: '$price'
+            }
+          }
+        }
+      ]).toArray();
+
+      const revenue = result.length > 0 ? result[0].totalRevenue : 0;
+
+      res.send({
+        users,
+        menuItems,
+        orders,
+        revenue
+      })
+    })
+
+    app.get('/order-stats', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await paymentCollection.aggregate([
+        {
+          $unwind: '$menuItemIds'
+        },
+        {
+          $lookup: {
+            from: 'menu',
+            localField: 'menuItemIds',
+            foreignField: '_id',
+            as: 'menuItems'
+          }
+        },
+        {
+          $unwind: '$menuItems'
+        },
+        {
+          $group: {
+            _id: '$menuItems.category',
+            quantity: { $sum: 1 },
+            revenue: { $sum: '$menuItems.price' }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            category: '$_id',
+            quantity: '$quantity',
+            revenue: '$revenue'
+          }
+        }
+      ]).toArray();
+
+      res.send(result);
+
+    })
 
     // ---------------- TEST ROUTES ----------------
     app.get('/', (req, res) => {
