@@ -53,7 +53,7 @@ const verifyToken = (req, res, next) => {
 
       return res.status(401).send({ message: 'unauthorized access' });
     }
-    console.log('✅ Decoded JWT:', decoded);
+    console.log(' Decoded JWT:', decoded);
 
     req.decoded = decoded;
     next();
@@ -72,7 +72,8 @@ const verifyAdmin = async (req, res, next) => {
 
 async function run() {
   try {
-    await client.connect();
+    // Connect the client to the server	(optional starting in v4.7)
+    // await client.connect();
     const database = client.db('bistroDB');
     menuCollection = database.collection('menu');
     cartCollection = database.collection('Carts');
@@ -151,20 +152,9 @@ async function run() {
     //  GET a single item by ID (for edit)
     app.get('/menu/:id', async (req, res) => {
       const id = req.params.id;
-      console.log('Fetching menu item by id:', id);
-      try {
-        const query = { _id: new ObjectId(id) };
-        const result = await menuCollection.findOne(query);
-
-        if (!result) {
-          return res.status(404).send({ message: 'Item not found' });
-        }
-
-        res.send(result);
-      } catch (error) {
-        console.error('Error fetching item by ID:', error);
-        res.status(500).send({ message: 'Server error' });
-      }
+      const query = { _id: new ObjectId(id) }
+      const result = await menuCollection.findOne(query);
+      res.send(result);
     });
 
     app.patch('/menu/:id', async (req, res) => {
@@ -305,26 +295,52 @@ async function run() {
       }
     });
 
-    // payment intent
+    // ===== Payment Intent =====
     app.post('/create-payment-intent', async (req, res) => {
       const { price } = req.body;
-      const amount = Math.round(Number(price) * 100);
-      console.log(amount, 'amount inside the intent');
-
+      const amount = parseInt(price * 100);
+      console.log(amount, 'amount inside the intent')
 
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amount,
         currency: 'usd',
-        payment_method_types: ['card'],
+        payment_method_types: ['card']
       });
 
       res.send({
-        clientSecret: paymentIntent.client_secret,
-      });
-      console.log(' Created PaymentIntent:', paymentIntent);
-
-
+        clientSecret: paymentIntent.client_secret
+      })
     });
+
+    app.get('/payments/:email', verifyToken, async (req, res) => {
+      const query = { email: req.params.email }
+      if (req.params.email !== req.decoded.email) {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+      const result = await paymentCollection.find(query).toArray();
+      res.send(result);
+    })
+
+    // ===== Post Payment =====
+    app.post('/create-payment-intent', async (req, res) => {
+      try {
+        const { price } = req.body;
+        const amount = Math.round(price * 100);
+        console.log(' Amount in cents:', amount);
+
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount,
+          currency: 'usd',
+          payment_method_types: ['card'],
+        });
+
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (error) {
+        console.error(' Stripe create-payment-intent error:', error);
+        res.status(500).send({ error: 'Failed to create payment intent' });
+      }
+    });
+
 
     app.get('/payments/:email', verifyToken, async (req, res) => {
       const query = { email: req.params.email }
@@ -352,16 +368,11 @@ async function run() {
       res.send({ paymentResult, deleteResult });
     })
 
-
-    // stats or analytics
+    // ===== Admin Stats =====
     app.get('/admin-stats', verifyToken, verifyAdmin, async (req, res) => {
       const users = await userCollection.estimatedDocumentCount();
       const menuItems = await menuCollection.estimatedDocumentCount();
       const orders = await paymentCollection.estimatedDocumentCount();
-
-      // this is not the best way
-      // const payments = await paymentCollection.find().toArray();
-      // const revenue = payments.reduce((total, payment) => total + payment.price, 0);
 
       const result = await paymentCollection.aggregate([
         {
@@ -382,63 +393,38 @@ async function run() {
         orders,
         revenue
       })
-    })
+    });
 
-    app.get('/order-stats', verifyToken, verifyAdmin, async (req, res) => {
+    // ===== Order Stats (for Charts) =====
+    app.get('/order-stats', async (req, res) => {
       const result = await paymentCollection.aggregate([
-        {
-          $unwind: '$menuItemIds'
-        },
-        {
-          $lookup: {
-            from: 'menu',
-            localField: 'menuItemIds',
-            foreignField: '_id',
-            as: 'menuItems'
-          }
-        },
-        {
-          $unwind: '$menuItems'
-        },
-        {
-          $group: {
-            _id: '$menuItems.category',
-            quantity: { $sum: 1 },
-            revenue: { $sum: '$menuItems.price' }
-          }
-        },
-        {
-          $project: {
-            _id: 0,
-            category: '$_id',
-            quantity: '$quantity',
-            revenue: '$revenue'
-          }
-        }
+
       ]).toArray();
 
       res.send(result);
 
-    })
+    });
+
 
     // ---------------- TEST ROUTES ----------------
-    app.get('/', (req, res) => {
-      res.send('Boss is sitting');
-    });
 
-    app.get('/api/data', (req, res) => {
-      res.json({ message: 'This is sample data from the API' });
-    });
 
-    // Test connection
-    await client.db('admin').command({ ping: 1 });
-    console.log(' Successfully connected to MongoDB!');
-  } catch (error) {
-    console.error(' MongoDB connection error:', error);
+    // Send a ping to confirm a successful connection
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
+  } finally {
+    // Ensures that the client will close when you finish/error
+    // await client.close();
   }
 }
 
+// Test connection
+
 run().catch(console.dir);
+
+app.get('/', (req, res) => {
+  res.send('Boss is sitting');
+});
 
 // Start Server
 app.listen(port, () => {
