@@ -14,7 +14,11 @@ const port = process.env.PORT || 5000;
 // ------------------ MIDDLEWARE ------------------
 app.use(
   cors({
-    origin: ['http://localhost:5173'],
+    origin: [
+      'http://localhost:5173',
+
+
+    ],
     credentials: true,
   })
 );
@@ -52,8 +56,11 @@ const verifyAdmin = async (req, res, next) => {
   next();
 };
 
+// ------------------ MAIN FUNCTION ------------------
 async function run() {
   try {
+    await client.connect();
+
     const db = client.db('bistroDB');
     const menuCollection = db.collection('menu');
     const cartCollection = db.collection('carts');
@@ -218,19 +225,19 @@ async function run() {
         const payment = {
           ...rest,
           menuItemIds: menuItemIds.map(id => new ObjectId(id)),
-          cartIds: cartIds.map(id => new ObjectId(id))
+          cartIds: cartIds.map(id => new ObjectId(id)),
         };
 
         const paymentResult = await paymentCollection.insertOne(payment);
 
-        // ✅ Delete purchased items from cart
+
         const deleteQuery = { _id: { $in: payment.cartIds } };
         const deleteResult = await cartCollection.deleteMany(deleteQuery);
 
         res.send({ paymentResult, deleteResult });
       } catch (error) {
-        console.error("Error saving payment:", error);
-        res.status(500).send({ error: "Payment failed to save" });
+        console.error('Error saving payment:', error);
+        res.status(500).send({ error: 'Payment failed to save' });
       }
 
     });
@@ -293,15 +300,24 @@ async function run() {
 
 
     // ---------------- ROOT ----------------
-    app.get('/', (req, res) => res.send('Bistro Boss Server is running...'));
+    app.get('/', (req, res) => {
+      res.send(' Bistro Boss Server is running successfully on Vercel!');
+    });
+
     console.log(' MongoDB connected successfully!');
   } finally {
-    // keep connection open
+    // keep connection open for serverless
   }
 }
 
-
+// ------------------ START SERVER ------------------
 
 run().catch(console.dir);
 
-app.listen(port, () => console.log(` Bistro Boss running on port: ${port}`));
+//  Export app for Vercel
+export default app;
+
+//  Local run (optional)
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(port, () => console.log(` Bistro Boss running on port: ${port}`));
+}
